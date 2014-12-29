@@ -16,6 +16,10 @@ else
   require 'stm32'
 end
 
+def isprint(c)
+  /[[:print:]]/ === c.chr
+end
+
 options = {}
 CONF_FILE='/etc/stm32.conf'
 
@@ -38,12 +42,13 @@ OptionParser.new do |opts|
   end
 end.parse!
 
-pp options
+#pp options
 
 stm=Stm32.new options
 
-pp stm.get_port()
+stm.get_port()
 if stm.boot
+  stm.get_info
   printf "BOOTED OK!\r\n>"
 else
   puts "Error: Boot failed! retry!\r\n"
@@ -100,13 +105,26 @@ begin
           else
             puts "Error: Run failed! retry!\r\n"
           end
-          system("stty raw -echo -icanon isig") # turn raw input on
-        elsif a[0]=="id"
-          puts "\nGet:"
-          stm.get_info
-          stm.get_id
           #system("stty raw -echo -icanon isig") # turn raw input on
-        elsif a[0]=="dmp"
+        elsif a[0]=="i"
+          stm.get_info
+        elsif a[0]=="e"
+          if a[1]
+            b=a[1].hex
+          else
+            b=0
+          end
+          stm.erase [b]
+        elsif a[0]=="w"
+          if a[1]
+            b=a[1].hex
+          else
+            b=oldaddr
+          end
+          stm.write b,[1,2,3,4]
+        elsif a[0]=="q"
+          break
+        elsif a[0]=="d"
           if a[1]
             addr=a[1].hex
           else
@@ -119,17 +137,21 @@ begin
           end
           buf=stm.read addr,len
           #printf "0x%08X:",addr
-          buf.each_with_index do |b,i|
-            if i&0xf==0x0
-              printf "\n0x%08X:  ",addr+i
+          if not buf
+            puts "Illegal address!"
+          else
+            buf.each_with_index do |b,i|
+              if i&0xf==0x0
+                printf "\n0x%08X:  ",addr+i
+              end
+              printf "%02X ",b
             end
-            printf "%02X ",b
+            printf "\n";
+            oldaddr=addr
           end
-          printf "\n";
-          oldaddr=addr
           #system("stty raw -echo -icanon isig") # turn raw input on
         else
-          puts "Commands: go,id"
+          puts "Commands: g(o), i(d), w(rite), r(ead), e(rase), q(uit)"
         end
         printf "\r\n>"
       end

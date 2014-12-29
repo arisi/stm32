@@ -35,7 +35,7 @@ class Stm32
 
   def initialize(hash={})
     @clist=@@Clist_def
-    puts "init #{hash}"
+    @debug=hash[:debug]
     if not hash[:dev]
       puts "Error: No serial Device??"
       return nil
@@ -87,12 +87,12 @@ class Stm32
       if ack
         if not ch
           return :tout
-        elsif ch.ord==0x1f
+        elsif ch== :nack
           printf("SYNC\r\n") if @debug
           send_buf [32],false #synch!
           flush_chars 0.1
         else
-          return :ack
+          return ch
         end
       else
         return :ack
@@ -114,7 +114,16 @@ class Stm32
     send_buf buf,ack
   end
 
-  def send_buf buf,ack=false
+  def send_buf_with_check buf,tout=0.1
+    check=0
+    buf.each do |b|
+      check ^=b
+    end
+    buf << check
+    send_buf buf,true,tout
+  end
+
+  def send_buf buf,ack=false,tout=0.1
     bytes=buf.pack("c*")
     printf "> "  if @debug
     bytes.split("").each do |ch|
@@ -124,12 +133,14 @@ class Stm32
     end
     puts ""  if @debug
     if ack
-      ch=wait_char
+      ch=wait_char tout
       if ch
         if ch==0x1f
           printf("< NACK: %02X\n",ch)   if @debug
+          return nil
         else
           printf("< ACK: %02X\n",ch)  if @debug
+          return :ack
         end
         return ch
       else
@@ -154,7 +165,6 @@ class Stm32
 
   def boot
     retries=0
-    puts "booting"
     delay=0.001
     while retries<10
       #$sp.rts=1 #if retries>5 #power off --really cold boot
@@ -192,10 +202,10 @@ class Stm32
     return false
   end
 
-  def wait_chars len
+  def wait_chars len,tout=0.1
     ret=[]
     len.times do
-      if ch=wait_char
+      if ch=wait_char(tout)
         ret << ch
       else
         puts "Warning: Short Data! #{ret}"
@@ -234,21 +244,21 @@ class Stm32
     end
   end
 
+
   def get_info
     if buf=cmd(:get)
-      puts "Bootloader version: #{buf[0].to_s(16)}"
+      puts "BL ver: #{buf[0].to_s(16)}"
       @clist=buf[1..-1]
-      puts "Command list updated to #{@clist}"
+      #puts "Command list updated to #{@clist}"
     end
-  end
-
-  def get_id
     if buf=cmd(:getid)
       @cpu=buf[0]*0x100 + buf[1]
       puts "Cpu ID: #{@cpu.to_s(16)}"
       if @@Cpu_ids[@cpu]
-        pp @@Cpu_ids[@cpu]
         @cpu_info=@@Cpu_ids[@cpu]
+        printf "Family: %s\n",  @cpu_info[:family]
+        printf "Ram:    %08X .. %08X %5.1fk\n",  @cpu_info[:ram_s],@cpu_info[:ram_e],(@cpu_info[:ram_e]-@cpu_info[:ram_s])/1024.0
+        printf "Flash:  %08X .. %08X %5.1fk\n",  @cpu_info[:flash_s],@cpu_info[:flash_e],(@cpu_info[:flash_e]-@cpu_info[:flash_s])/1024.0
         addr=@cpu_info[:serno]
         base=addr&(0xffffff00)
         oset=addr&(0xff)
@@ -258,7 +268,7 @@ class Stm32
           serno += sprintf("%02X",buf[oset+i])
         end
         @serno=serno
-        puts "serno:'#{serno}'."
+        puts "Serno:  '#{serno}'."
       end
     end
   end
@@ -267,7 +277,7 @@ class Stm32
     if send_cmd(:read)
       if send_addr addr
         ch=send_buf [(len-1),0xff - (len-1)],true
-        if buf=wait_chars(len)
+        if buf=wait_chars(len,0.1)
           if @debug
             printf "len=#{len}:"
             buf.each do |b|
@@ -277,6 +287,44 @@ class Stm32
           end
           return buf
         end
+      end
+    end
+    return nil
+  end
+
+  def write addr,data
+    return(nil) if not data or data==[]
+    len=data.length
+    if len>0x100
+      puts "Too big block to write #{len}"
+      return nil
+    end
+    if send_cmd(:write)
+      if send_addr addr
+        list=[data.length-1]
+        list+=data
+        if ack=send_buf_with_check(list,3)
+          puts "Write Result: #{ack}"
+          return ack
+        end
+      end
+    end
+    puts "Error: Write fails!"
+    flush_chars # failed write may have produced some nacks
+    return nil
+  end
+
+  def erase blocks
+    return if not blocks or blocks==[]
+    list=[blocks.length-1].pack("n").unpack("cc")
+    blocks.each do |b|
+      list+=[b].pack("n").unpack("cc")
+    end
+    pp list
+    if send_cmd(:erase)
+      if ack=send_buf_with_check(list,3)
+        puts "Erase Result: #{ack}"
+        return ack
       end
     end
     return nil
@@ -297,7 +345,7 @@ class Stm32
           if ch=wait_char
             puts "Started Running, retries: #{retries} got #{ch}\n"  if @debug
             if ch==0
-               @state=:running
+              @state=:running
               return true
             end
           else
@@ -312,6 +360,7 @@ class Stm32
       end
       retries+=1
     end
+    boot #return to bootstrap mode
+    return false
   end
-
 end
