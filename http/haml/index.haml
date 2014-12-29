@@ -1,0 +1,39 @@
+!!!
+%head
+  %title stm32 -- Ruby library
+  %meta{:charset => "utf-8"}/
+  %link{:href => "/css/reset.css", :rel => "stylesheet", :type => "text/css"}
+  %link{:href => "/css/ui.fancytree.css ", :rel => "stylesheet", :type => "text/css"}
+  %link{:href => "/css/642.css", :rel => "stylesheet", :type => "text/css"}
+  %link{:href => "/css/style.css", :rel => "stylesheet", :type => "text/css"}
+  %link{:href => "http://netdna.bootstrapcdn.com/font-awesome/3.2.1/css/font-awesome.min.css", :rel => "stylesheet", :type => "text/css"}
+
+  %script{:src => "https://code.jquery.com/jquery-2.1.1.min.js"}
+  %script{:src => "https://code.jquery.com/ui/1.11.2/jquery-ui.min.js"}
+  %script{:src => "http://static.lnx.fi/mygit/jquery.fancytree-all.js"}
+  //%script{:src => "https://rawgit.com/mar10/fancytree/master/src/jquery.fancytree.js"}
+  //%script{:src => "https://rawgit.com/mar10/fancytree/master/src/jquery.fancytree.edit.js"}
+  //%script{:src => "https://rawgit.com/mar10/fancytree/master/src/jquery.fancytree.dnd.js"}
+  %script{:src => "//cdnjs.cloudflare.com/ajax/libs/ace/1.1.3/ace.js"}
+  %script{:src => "//cdnjs.cloudflare.com/ajax/libs/ace/1.1.3/mode-haml.js"}
+  %script{:src => "/script.js"}
+
+%body
+  #wrapper
+    #navigation
+      stm32 -- Ruby library for STM32-family &micro;controllers
+      %span#status
+    #cmenu
+      %a.pro{onClick: "stm_port('boot',0); return(false);"} BOOT
+      %a.pro{onClick: "stm_port('id',0); return(false);"} ID
+      %a.pro{onClick: "stm_port('flash',0); return(false);"} FLASH
+      %a.pro{onClick: "stm_port('go',0); return(false);"} GO
+    #rightcolumn
+    #cbot
+      %input{onkeydown: "if (event.keyCode == 13) {stm_port('puts',$(this).val());$(this).val('');}; return(true);"}
+      %a.pro{onClick: "stm_port('puts','tasks stat'); return(false);"} TASKS
+      %a.pro{onClick: "stm_port('puts','cfg dump'); return(false);"} CFG
+      %a.pro{onClick: "stm_port('puts','auth 1682'); return(false);"} AUTH
+      %a.pro{onClick: "stm_port('puts','ident'); return(false);"} IDENT
+
+

@@ -12,6 +12,9 @@ class IO
   end
 end
 
+def broadcast str
+  printf str
+end
 
 class Stm32
   @port=nil
@@ -264,18 +267,18 @@ class Stm32
 
   def get_info
     if buf=cmd(:get)
-      puts "BL ver: #{buf[0].to_s(16)}"
+      broadcast "\nBL ver: #{buf[0].to_s(16)}\n"
       @clist=buf[1..-1]
       #puts "Command list updated to #{@clist}"
     end
     if buf=cmd(:getid)
       @cpu=buf[0]*0x100 + buf[1]
-      puts "Cpu ID: #{@cpu.to_s(16)}"
+      broadcast "Cpu ID: #{@cpu.to_s(16)}\n"
       if @@Cpu_ids[@cpu]
         @cpu_info=@@Cpu_ids[@cpu]
-        printf "Family: %s\n",  @cpu_info[:family]
-        printf "Ram:    %08X .. %08X %5.1fk\n",  @cpu_info[:ram_s],@cpu_info[:ram_e],(@cpu_info[:ram_e]-@cpu_info[:ram_s])/1024.0
-        printf "Flash:  %08X .. %08X %5.1fk\n",  @cpu_info[:flash_s],@cpu_info[:flash_e],(@cpu_info[:flash_e]-@cpu_info[:flash_s])/1024.0
+        broadcast(sprintf "Family: %s\n",  @cpu_info[:family])
+        broadcast(sprintf "Ram:    %08X .. %08X %5.1fk\n",  @cpu_info[:ram_s],@cpu_info[:ram_e],(@cpu_info[:ram_e]-@cpu_info[:ram_s])/1024.0)
+        broadcast(sprintf "Flash:  %08X .. %08X %5.1fk\n",  @cpu_info[:flash_s],@cpu_info[:flash_e],(@cpu_info[:flash_e]-@cpu_info[:flash_s])/1024.0)
         addr=@cpu_info[:serno]
         base=addr&(0xffffff00)
         oset=addr&(0xff)
@@ -285,7 +288,7 @@ class Stm32
           serno += sprintf("%02X",buf[oset+i])
         end
         @serno=serno
-        puts "Serno:  '#{serno}'."
+        broadcast "Serno:  '#{serno}'.\n"
       end
     end
   end
@@ -313,7 +316,7 @@ class Stm32
     return(nil) if not data or data==[]
     len=data.length
     if len>0x100
-      puts "Too big block to write #{len}"
+      broadcast "Too big block to write #{len}\n"
       return nil
     end
     if send_cmd(:write)
@@ -326,7 +329,7 @@ class Stm32
         end
       end
     end
-    puts "Error: Write fails!"
+    broadcast "Error: Write fails!\n"
     flush_chars # failed write may have produced some nacks
     return nil
   end
@@ -346,11 +349,11 @@ class Stm32
     return nil
   end
 
-  def run addr=0x08000000
-    printf "try to Run @ %x",addr
+  def go addr=0x08000000
+    #printf "try to Run @ %x",addr
     if @state!=:booted
       if not boot
-        puts "Error: Cannot run, as cannot get booted"
+        broadcast "Error: Cannot run, as cannot get booted\n"
         return nil
       end
     end
@@ -365,13 +368,13 @@ class Stm32
               return true
             end
           else
-            puts "Started Running???, retries: #{retries} -- no start char\n"
+            broadcast "Started Running???, retries: #{retries} -- no start char\n"
           end
         end
       end
-      puts "run failed, retry boot and run"
+      broadcast "run failed, retry boot and run\n"
       if not boot
-        puts "Error: Cannot run, as cannot get booted"
+        broadcast "Error: Cannot run, as cannot get booted\n"
         return nil
       end
       retries+=1
@@ -381,12 +384,19 @@ class Stm32
   end
 
   def flash fn
+    if @state!=:booted
+      if not boot
+        broadcast "Error: Cannot flash, as cannot get booted\n"
+        return nil
+      end
+    end
+    broadcast "Flashing #{fn}\n"
     s=Srec.new file: fn
     bsize=get_cpu(:flash_bsize)
     fs=get_cpu(:flash_s)
     fe=get_cpu(:flash_e)
     b= s.to_blocks fs,fe,bsize
-    puts "#{b.size} blocks of #{bsize} bytes"
+    broadcast "#{b.size} blocks of #{bsize} bytes\n"
     list=[]
     b.each do |blk,data|
       list << blk
@@ -394,24 +404,29 @@ class Stm32
     start=Time.now.to_i
     if erase list
       dur=Time.now.to_i-start
-      puts "Erased in #{dur}s"
+      broadcast "Erased in #{dur}s\n"
       cnt=0
       start=Time.now.to_i
       b.each do |blk,data|
         addr=blk*bsize+fs
         if write addr,data
-          printf("\r#{cnt}/#{b.length} %.0f%%",100.0*cnt/b.length) if cnt%10==0
+          if cnt%10==0
+            printf("\r#{cnt}/#{b.length} %.0f%% ",100.0*cnt/b.length)
+            broadcast "."
+          end
         else
-          puts "Error: Write fails at #{addr}"
+          broadcast "Error: Write fails at #{addr}\n"
           break
         end
         cnt+=1
       end
       dur=Time.now.to_i-start
-      puts "\nFlashed in #{dur}s"
+      broadcast "\nFlashed in #{dur}s\n"
+      return true
     else
       puts "Error: Erase failed"
     end
+    return nil
   end
 
 end

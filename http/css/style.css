@@ -1,0 +1,53 @@
+body {
+  background-color: black;
+}
+
+a {
+  cursor: pointer;
+  font-size:  10pt;
+}
+
+#status {
+  float:right;
+}
+
+
+.gitminus {
+  background-color: #602020;
+}
+.gitplus {
+  background-color: #206020;
+}
+.gitchange {
+  background-color: #202060;
+}
+
+.changed{
+  border: 1px solid gray;
+}
+.changed:after {
+    content: "*";
+    color: yellow;
+    margin-right: 10px;
+}
+
+.gits{
+  border: 1px solid red;
+}
+
+.gits:after {
+  content: "G";
+  color: white;
+  margin-right: 10px;
+  background-color: red;
+}
+
+.errs{
+  border: 2px solid red;
+}
+.errs:before {
+  content: "E";
+  color: white;
+  margin-left: 10px;
+  background-color: red;
+}

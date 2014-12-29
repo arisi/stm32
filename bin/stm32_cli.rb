@@ -43,16 +43,69 @@ OptionParser.new do |opts|
   opts.on("--dev dev", "serial device to use (/dev/ttyUSB0)") do |v|
     options[:dev] = v
   end
+  opts.on('-f',"--flash file", "S-record file to flash") do |v|
+    options[:flash] = v
+  end
+  opts.on('-g',"--go", "boot and run") do |v|
+    options[:go] = true
+  end
+
+  opts.on("-h", "--http port", "Http port for debug/status JSON server (false)") do |v|
+    options[:http_port] = v.to_i
+  end
+
+
 end.parse!
+
+$sq=Queue.new
+if options[:http_port]
+  puts "Loading Http-server.. hold on.."
+  require 'minimal-http-ruby'
+  if local
+    minimal_http_server http_port: options[:http_port], http_path:  './http/'
+  else
+    minimal_http_server http_port: options[:http_port], http_path:  File.join( Gem.loaded_specs['stm32'].full_gem_path, 'http/')
+  end
+  puts "\n"
+  def broadcast str
+    return if str==""
+    print str
+    str=str.gsub(/\r/,"")
+    $sessions.each do |s,data|
+      $sessions[s][:queue] << str
+    end
+  end
+  sleep 1
+else
+  def broadcast str
+    printf str
+  end
+end
+
+
 
 #pp options
 
 stm=Stm32.new options
 
-stm.get_port()
+$sp=stm.get_port()
 if stm.boot
   stm.get_info
-  printf "BOOTED OK!\r\n>"
+  if options[:flash]
+    if stm.flash options[:flash]
+      if stm.run
+        broadcast "RUNNING OK!\n\n"
+      end
+    end
+  else
+    if options[:go]
+      if stm.run
+        broadcast "RUNNING OK!\n\n"
+      end
+    else
+      broadcast "BOOTED OK!\r\n>"
+    end
+  end
 else
   puts "Error: Boot failed! retry!\r\n"
 end
@@ -62,116 +115,154 @@ port=stm.get_port
 $stdout.sync = true
 oldstate=:unknown
 oldaddr=0x08000000
+@bufo=""
+silent=0
+$state = `stty -g`
+
+def do_go stm
+  if stm.go
+    broadcast "GO OK!\n"
+  else
+    broadcast "Error: Go failed! retry!\n"
+  end
+end
+
+def do_boot stm
+  system "stty #{$state}" # turn raw input off
+  if stm.boot
+    broadcast "\n\nBOOTED OK!\n>"
+  else
+    broadcast "Error: Boot failed! retry!\n"
+  end
+end
+
 begin
-  state = `stty -g`
   loop do
     curstate=stm.get_state
     if oldstate!=curstate
       if curstate==:running
         system("stty raw -echo -icanon isig") # turn raw input on
       else
-        system "stty #{state}" # turn raw input off
+        system "stty #{$state}" # turn raw input off
       end
       oldstate=curstate
     end
     if port.ready_for_read?
       ch = port.readbyte
-      if ch==0x0a and stm.get_state==:running
-        printf "\n\r"
+      if not ch
+      elsif ch==0x0a and stm.get_state==:running
+        @bufo+= "\n\r"
       elsif ch==0x0d and stm.get_state==:running
 
       elsif ch>0x1f and stm.get_state==:running
-        printf "%c",ch
+        @bufo+=ch.chr
       else
-        printf "[%02x]",ch
+        @bufo+=sprintf("[%02x]",ch)
       end
-    elsif $stdin.ready?
-      if curstate==:running  #terminal mode
-        c = $stdin.getc
-        if c.ord==0x02
-          system "stty #{state}" # turn raw input off
-          if stm.boot
-            printf "BOOTED OK!\r\n>"
-          else
-            puts "Error: Boot failed! retry!\r\n"
-          end
-          #system("stty raw -echo -icanon isig") # turn raw input on
-        else
-          port.write c
-        end
-      else #debugger
-        c = $stdin.gets.chop
-        a=c.split " "
-        if a[0]=="g"
-          if stm.run
-            puts "RUN OK!\r\n"
-          else
-            puts "Error: Run failed! retry!\r\n"
-          end
-          #system("stty raw -echo -icanon isig") # turn raw input on
-        elsif a[0]=="i"
-          stm.get_info
-        elsif a[0]=="e"
-          if a[1]
-            b=a[1].hex
-          else
-            b=0
-          end
-          stm.erase [b]
-        elsif a[0]=="w" or a[0]=="wf"
-          if a[1]
-            addr=a[1].hex
-          else
-            addr=oldaddr
-          end
-          if a[2]
-            data=[a[2].to_i,0x11,0x22,0x33]
-          else
-            data=[1,2,3,4]
-          end
-          addr |= 0x08000000 if a[0]=="wf"
-          stm.write addr,data
-          oldaddr=addr
-        elsif a[0]=="f"
-          stm.flash("/home/arisi/projects/mygit/arisi/ctex/bin/sol_STM32L_mg11.srec")
-        elsif a[0]=="q"
-          break
-        elsif a[0]=="r" or a[0]=="rf"
-          if a[1]
-            addr=a[1].hex
-          else
-            addr=oldaddr
-          end
-          addr |= 0x08000000 if a[0]=="rf"
-          if a[2]
-            len=a[2].hex
-          else
-            len=0x100
-          end
-          buf=stm.read addr,len
-          #printf "0x%08X:",addr
-          if not buf
-            puts "Illegal address!"
-          else
-            buf.each_with_index do |b,i|
-              if i&0xf==0x0
-                printf "\n0x%08X:  ",addr+i
-              end
-              printf "%02X ",b
-            end
-            printf "\n";
-            oldaddr=addr
-          end
-          #system("stty raw -echo -icanon isig") # turn raw input on
-        else
-          puts "Commands: g(o), i(d), w(rite), r(ead), e(rase), q(uit)"
-        end
-        printf "\r\n>"
+      if (silent>2 and @bufo!="") or (@bufo.size>10)
+        broadcast @bufo
+        #printf @bufo
+        @bufo=""
+        silent=0
       end
     else
-      sleep 0.01
+      if $stdin.ready?
+        if curstate==:running  #terminal mode
+          c = $stdin.getc
+          if c.ord==0x02
+            do_boot(stm)
+            #system("stty raw -echo -icanon isig") # turn raw input on
+          else
+            port.write c
+          end
+        else #debugger
+          c = $stdin.gets.chop
+          a=c.split " "
+          if a[0]=="g"
+            do_go stm
+            #system("stty raw -echo -icanon isig") # turn raw input on
+          elsif a[0]=="i"
+            stm.get_info
+          elsif a[0]=="e"
+            if a[1]
+              b=a[1].hex
+            else
+              b=0
+            end
+            stm.erase [b]
+          elsif a[0]=="w" or a[0]=="wf"
+            if a[1]
+              addr=a[1].hex
+            else
+              addr=oldaddr
+            end
+            if a[2]
+              data=[a[2].to_i,0x11,0x22,0x33]
+            else
+              data=[1,2,3,4]
+            end
+            addr |= 0x08000000 if a[0]=="wf"
+            stm.write addr,data
+            oldaddr=addr
+          elsif a[0]=="f" and options[:flash]
+            stm.flash(options[:flash])
+          elsif a[0]=="q"
+            break
+          elsif a[0]=="r" or a[0]=="rf"
+            if a[1]
+              addr=a[1].hex
+            else
+              addr=oldaddr
+            end
+            addr |= 0x08000000 if a[0]=="rf"
+            if a[2]
+              len=a[2].hex
+            else
+              len=0x100
+            end
+            buf=stm.read addr,len
+            #printf "0x%08X:",addr
+            if not buf
+              broadcast "Illegal address!\n"
+            else
+              buf.each_with_index do |b,i|
+                if i&0xf==0x0
+                  broadcast(sprintf("\n0x%08X:  ",addr+i) )
+                end
+                broadcast(sprintf("%02X ",b))
+              end
+              broadcast "\n";
+              oldaddr=addr
+            end
+            #system("stty raw -echo -icanon isig") # turn raw input on
+          else
+            broadcast "Commands: g(o), i(d), w(rite) addr data, r(ead) addr len, e(rase) blk, f(lash) fn, q(uit)"
+          end
+          broadcast "\r\n>"
+        end
+      elsif not $sq.empty?
+        begin
+          act=$sq.pop
+          #puts "\ngot #{act}"
+          if act[:act]=="go"
+            do_go stm
+          elsif act[:act]=="flash"
+            stm.flash "/home/arisi/projects/mygit/arisi/ctex/bin/sol_STM32L_mg11.srec"
+            stm.go
+          elsif act[:act]=="boot"
+            do_boot(stm)
+         elsif act[:act]=="id"
+            stm.get_info
+          end
+          broadcast "\r\n>"
+        rescue => e
+          puts "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq error:",e
+        end
+      else
+        sleep 0.01
+      end
     end
   end
 ensure
-  system "stty #{state}" # turn raw input off
+  system "stty #{$state}" # turn raw input off
 end
