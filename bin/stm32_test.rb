@@ -8,6 +8,8 @@ require 'pp'
 require 'io/wait'
 
 local=false
+require './lib/srec.rb'
+
 if File.file? './lib/stm32.rb'
   require './lib/stm32.rb'
   puts "using local lib"
@@ -99,7 +101,7 @@ begin
       else #debugger
         c = $stdin.gets.chop
         a=c.split " "
-        if a[0]=="go"
+        if a[0]=="g"
           if stm.run
             puts "RUN OK!\r\n"
           else
@@ -115,21 +117,53 @@ begin
             b=0
           end
           stm.erase [b]
-        elsif a[0]=="w"
-          if a[1]
-            b=a[1].hex
-          else
-            b=oldaddr
-          end
-          stm.write b,[1,2,3,4]
-        elsif a[0]=="q"
-          break
-        elsif a[0]=="d"
+        elsif a[0]=="w" or a[0]=="wf"
           if a[1]
             addr=a[1].hex
           else
             addr=oldaddr
           end
+          if a[2]
+            data=[a[2].to_i,0x11,0x22,0x33]
+          else
+            data=[1,2,3,4]
+          end
+          addr |= 0x08000000 if a[0]=="wf"
+          stm.write addr,data
+          oldaddr=addr
+        elsif a[0]=="f"
+          s=Srec.new file: "/home/arisi/projects/mygit/arisi/ctex/bin/sol_STM32L_mg11.srec"
+          b= s.to_blocks 0x8000000,0x08020000,0x100
+          puts "#{b.size} blocks"
+          list=[]
+          b.each do |blk,data|
+            list << blk
+          end
+          stm.erase list
+          puts "erased!"
+          cnt=0
+          start=Time.now.to_i
+          b.each do |blk,data|
+            addr=blk*0x100+0x8000000
+            if stm.write addr,data
+              printf("\r#{cnt}/#{b.length} %.0f%%",100.0*cnt/b.length) if cnt%10==0
+            else
+              puts "Error: Write fails at #{addr}"
+              break
+            end
+            cnt+=1
+          end
+          dur=Time.now.to_i-start
+          puts "flashed in #{dur} sec"
+        elsif a[0]=="q"
+          break
+        elsif a[0]=="r" or a[0]=="rf"
+          if a[1]
+            addr=a[1].hex
+          else
+            addr=oldaddr
+          end
+          addr |= 0x08000000 if a[0]=="rf"
           if a[2]
             len=a[2].hex
           else

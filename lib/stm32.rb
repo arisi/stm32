@@ -69,7 +69,8 @@ class Stm32
   end
 
   def flush_chars tout=0.1
-    while wait_char tout do
+    while ch=wait_char(tout) do
+      puts "\nWarning: Flushed #{ch.to_s(16)}\n"
     end
   end
 
@@ -81,7 +82,7 @@ class Stm32
       puts "Error: Unsupported command #{cmd}"
     end
     retries=0
-    flush_chars 0.1
+    flush_chars 0.001
     while retries<2 do
       ch=send_buf [c,0xff-c],ack
       if ack
@@ -219,6 +220,9 @@ class Stm32
     boot if @state!=:booted
     puts "cmd: #{c}"  if @debug
     send_cmd c
+    if c==:write #no reply expected
+      return
+    end
     if len=wait_char
       len+=1
       if buf=wait_chars(len)
@@ -304,7 +308,7 @@ class Stm32
         list=[data.length-1]
         list+=data
         if ack=send_buf_with_check(list,3)
-          puts "Write Result: #{ack}"
+          #puts "Write Result: #{ack}"
           return ack
         end
       end
@@ -320,10 +324,9 @@ class Stm32
     blocks.each do |b|
       list+=[b].pack("n").unpack("cc")
     end
-    pp list
     if send_cmd(:erase)
       if ack=send_buf_with_check(list,3)
-        puts "Erase Result: #{ack}"
+        puts "Erase #{list.size} Pages Result: #{ack}"
         return ack
       end
     end
