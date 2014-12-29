@@ -8,7 +8,7 @@ require 'pp'
 require 'io/wait'
 
 local=false
-require './lib/srec.rb'
+require 'srec'
 
 if File.file? './lib/stm32.rb'
   require './lib/stm32.rb'
@@ -21,6 +21,7 @@ end
 def isprint(c)
   /[[:print:]]/ === c.chr
 end
+
 
 options = {}
 CONF_FILE='/etc/stm32.conf'
@@ -132,29 +133,7 @@ begin
           stm.write addr,data
           oldaddr=addr
         elsif a[0]=="f"
-          s=Srec.new file: "/home/arisi/projects/mygit/arisi/ctex/bin/sol_STM32L_mg11.srec"
-          b= s.to_blocks 0x8000000,0x08020000,0x100
-          puts "#{b.size} blocks"
-          list=[]
-          b.each do |blk,data|
-            list << blk
-          end
-          stm.erase list
-          puts "erased!"
-          cnt=0
-          start=Time.now.to_i
-          b.each do |blk,data|
-            addr=blk*0x100+0x8000000
-            if stm.write addr,data
-              printf("\r#{cnt}/#{b.length} %.0f%%",100.0*cnt/b.length) if cnt%10==0
-            else
-              puts "Error: Write fails at #{addr}"
-              break
-            end
-            cnt+=1
-          end
-          dur=Time.now.to_i-start
-          puts "flashed in #{dur} sec"
+          stm.flash("/home/arisi/projects/mygit/arisi/ctex/bin/sol_STM32L_mg11.srec")
         elsif a[0]=="q"
           break
         elsif a[0]=="r" or a[0]=="rf"

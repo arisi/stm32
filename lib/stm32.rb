@@ -3,6 +3,7 @@
 
 require 'json'
 require 'serialport'
+#require 'srec'
 
 class IO
   def ready_for_read?
@@ -29,7 +30,16 @@ class Stm32
     erase:  {index:6},
   }
   @@Cpu_ids={
-    0x416 => {family: :L1,ram_s:0x20000800,ram_e:0x20004000,flash_s:0x8000000,flash_e:0x08020000,flash_blk:4096,serno:0x1ff80050,flash_initial:0},
+    0x416 => {
+      family: :L1,
+      ram_s:0x20000800,
+      ram_e:0x20004000,
+      flash_s:0x8000000,
+      flash_e:0x08020000,
+      flash_bsize:0x100,
+      serno:0x1ff80050,
+      flash_initial:0
+      },
     0x413 => {family: :F4,ram_s:0x20002000,ram_e:0x20020000,flash_s:0x8000000,flash_e:0x08100000,flash_blk:16384,serno:0x1fff7a10,flash_initial:0xff},
     }
 
@@ -66,6 +76,9 @@ class Stm32
   end
   def get_state()
     @state
+  end
+  def get_cpu(k)
+    @cpu_info[k]
   end
 
   def flush_chars tout=0.1
@@ -326,7 +339,7 @@ class Stm32
     end
     if send_cmd(:erase)
       if ack=send_buf_with_check(list,3)
-        puts "Erase #{list.size} Pages Result: #{ack}"
+        #puts "Erase #{list.size} Pages Result: #{ack}"
         return ack
       end
     end
@@ -366,4 +379,39 @@ class Stm32
     boot #return to bootstrap mode
     return false
   end
+
+  def flash fn
+    s=Srec.new file: fn
+    bsize=get_cpu(:flash_bsize)
+    fs=get_cpu(:flash_s)
+    fe=get_cpu(:flash_e)
+    b= s.to_blocks fs,fe,bsize
+    puts "#{b.size} blocks of #{bsize} bytes"
+    list=[]
+    b.each do |blk,data|
+      list << blk
+    end
+    start=Time.now.to_i
+    if erase list
+      dur=Time.now.to_i-start
+      puts "Erased in #{dur}s"
+      cnt=0
+      start=Time.now.to_i
+      b.each do |blk,data|
+        addr=blk*bsize+fs
+        if write addr,data
+          printf("\r#{cnt}/#{b.length} %.0f%%",100.0*cnt/b.length) if cnt%10==0
+        else
+          puts "Error: Write fails at #{addr}"
+          break
+        end
+        cnt+=1
+      end
+      dur=Time.now.to_i-start
+      puts "\nFlashed in #{dur}s"
+    else
+      puts "Error: Erase failed"
+    end
+  end
+
 end
