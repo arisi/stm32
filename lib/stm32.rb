@@ -16,11 +16,25 @@ class Stm32
   @port=nil
   @dev=nil
   @state=nil
+  @cpu_info={}
+  @debug=true
+  @@Clist_def=[0x00,0x01,0x02,0x11,0x21,0x31,0x44,0x63,0x73,0x82,0x92]
   @@Commands={
-    "go"    => 0x21,
-    "getid" => 0x02,
+    get:    {index:0},
+    getver: {index:1},
+    getid:  {index:2},
+    read:   {index:3},
+    go:     {index:4},
+    write:  {index:5},
+    erase:  {index:6},
   }
+  @@Cpu_ids={
+    0x416 => {family: :L1,ram_s:0x20000800,ram_e:0x20004000,flash_s:0x8000000,flash_e:0x08020000,flash_blk:4096,serno:0x1ff80050,flash_initial:0},
+    0x413 => {family: :F4,ram_s:0x20002000,ram_e:0x20020000,flash_s:0x8000000,flash_e:0x08100000,flash_blk:16384,serno:0x1fff7a10,flash_initial:0xff},
+    }
+
   def initialize(hash={})
+    @clist=@@Clist_def
     puts "init #{hash}"
     if not hash[:dev]
       puts "Error: No serial Device??"
@@ -42,7 +56,7 @@ class Stm32
       return nil
     end
     @dev=hash[:dev]
-    puts "Open Serial OK!"
+    puts "Open Serial OK!" if @debug
   end
   def get_port()
     @port
@@ -50,10 +64,41 @@ class Stm32
   def get_dev()
     @dev
   end
+  def get_state()
+    @state
+  end
+
+  def flush_chars tout=0.1
+    while wait_char tout do
+    end
+  end
 
   def send_cmd cmd,ack=true
-    c=@@Commands[cmd]
-    send_buf [c,0xff-c],ack
+    if not @@Commands[cmd] or not @@Commands[cmd][:index]
+      puts "Error: Unknown command #{cmd}"
+    end
+    if not c=@clist[@@Commands[cmd][:index]]
+      puts "Error: Unsupported command #{cmd}"
+    end
+    retries=0
+    flush_chars 0.1
+    while retries<2 do
+      ch=send_buf [c,0xff-c],ack
+      if ack
+        if not ch
+          return :tout
+        elsif ch.ord==0x1f
+          printf("SYNC\r\n") if @debug
+          send_buf [32],false #synch!
+          flush_chars 0.1
+        else
+          return :ack
+        end
+      else
+        return :ack
+      end
+    end
+    :nack
   end
 
   def send_addr a,ack=true
@@ -71,15 +116,25 @@ class Stm32
 
   def send_buf buf,ack=false
     bytes=buf.pack("c*")
-    @port.write bytes
+    printf "> "  if @debug
+    bytes.split("").each do |ch|
+      @port.write ch
+      printf("%02X ",ch.ord)  if @debug
+      sleep 0.0001
+    end
+    puts ""  if @debug
     if ack
       ch=wait_char
       if ch
-        #printf "send_buf got ack: %02X\n",ch
-        return ack
+        if ch==0x1f
+          printf("< NACK: %02X\n",ch)   if @debug
+        else
+          printf("< ACK: %02X\n",ch)  if @debug
+        end
+        return ch
       else
-        puts "send_buf no ack!!!!!!!!!!"
-        return false
+        puts "< TOUT"
+        return nil
       end
     end
     return true
@@ -100,7 +155,7 @@ class Stm32
   def boot
     retries=0
     puts "booting"
-    delay=0.01
+    delay=0.001
     while retries<10
       #$sp.rts=1 #if retries>5 #power off --really cold boot
       #sleep 0.5
@@ -115,29 +170,120 @@ class Stm32
       ch=wait_char delay
 
       if ch and ch==0
-        printf("OK: [%02x]", ch )
+        printf("OK: [%02x]", ch )  if @debug
         sleep delay
       end
       send_buf [0x7f]
       if ch=wait_char
         if ch==0x79
-          puts "Booted OK, retries=#{retries}\n"
+          puts "Booted OK, retries=#{retries}\n"   if @debug
           @state=:booted
           return true
         else
-          puts "Error:got strange ack: %02X\n",ch
+          printf "Error:got strange ack: %02X '%c'\n",ch,ch
         end
       else
         puts "Error: no cmd ack"
       end
       retries+=1
+      delay*=2
     end
     puts "Error:not booted, gave up\n"
     return false
   end
 
+  def wait_chars len
+    ret=[]
+    len.times do
+      if ch=wait_char
+        ret << ch
+      else
+        puts "Warning: Short Data! #{ret}"
+        return nil
+      end
+    end
+    return ret
+  end
+
+  def cmd c
+    boot if @state!=:booted
+    puts "cmd: #{c}"  if @debug
+    send_cmd c
+    if len=wait_char
+      len+=1
+      if buf=wait_chars(len)
+        if @debug
+          printf "len=#{len}:"
+          buf.each do |b|
+            printf "%02X ",b
+          end
+          printf "\n"
+        end
+        if ack=wait_char
+          if ack==0x79
+            return buf
+          else
+            puts "Error: no ack for cmd #{c} #{ack}"
+          end
+        else
+          puts "Error: tout at ack for #{c}"
+        end
+      else
+        puts "Error: timeout for #{c}"
+      end
+    end
+  end
+
+  def get_info
+    if buf=cmd(:get)
+      puts "Bootloader version: #{buf[0].to_s(16)}"
+      @clist=buf[1..-1]
+      puts "Command list updated to #{@clist}"
+    end
+  end
+
+  def get_id
+    if buf=cmd(:getid)
+      @cpu=buf[0]*0x100 + buf[1]
+      puts "Cpu ID: #{@cpu.to_s(16)}"
+      if @@Cpu_ids[@cpu]
+        pp @@Cpu_ids[@cpu]
+        @cpu_info=@@Cpu_ids[@cpu]
+        addr=@cpu_info[:serno]
+        base=addr&(0xffffff00)
+        oset=addr&(0xff)
+        buf=read base,oset+0x10
+        serno=""
+        10.times do |i|
+          serno += sprintf("%02X",buf[oset+i])
+        end
+        @serno=serno
+        puts "serno:'#{serno}'."
+      end
+    end
+  end
+
+  def read addr,len
+    if send_cmd(:read)
+      if send_addr addr
+        ch=send_buf [(len-1),0xff - (len-1)],true
+        if buf=wait_chars(len)
+          if @debug
+            printf "len=#{len}:"
+            buf.each do |b|
+              printf "%02X ",b
+            end
+            printf "\n"
+          end
+          return buf
+        end
+      end
+    end
+    return nil
+  end
+
   def run addr=0x08000000
-    puts "running #{addr}"
+    printf "try to Run @ %x",addr
     if @state!=:booted
       if not boot
         puts "Error: Cannot run, as cannot get booted"
@@ -146,12 +292,12 @@ class Stm32
     end
     retries=0
     while retries<4 do
-      if send_cmd "go"
+      if send_cmd :go
         if send_addr addr
           if ch=wait_char
-            puts "Started Running, retries: #{retries} got #{ch}\n"
+            puts "Started Running, retries: #{retries} got #{ch}\n"  if @debug
             if ch==0
-               @state!=:runnign
+               @state=:running
               return true
             end
           else
