@@ -32,6 +32,8 @@
     #cbot
       %input{onkeydown: "if (event.keyCode == 13) {stm_port('puts',$(this).val());$(this).val('');}; return(true);"}
       %a.pro{onClick: "stm_port('puts','tasks stat'); return(false);"} TASKS
+      %a.pro{onClick: "stm_port('puts','rbuf stat'); return(false);"} RBUFS
+      %a.pro{onClick: "stm_port('puts','mem stat'); return(false);"} MEMSTAT
       %a.pro{onClick: "stm_port('puts','cfg dump'); return(false);"} CFG
       %a.pro{onClick: "stm_port('puts','auth 1682'); return(false);"} AUTH
       %a.pro{onClick: "stm_port('puts','ident'); return(false);"} IDENT

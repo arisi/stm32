@@ -4,6 +4,7 @@
 require 'optparse'
 require 'yaml'
 require 'pp'
+#require 'p3'
 
 require 'io/wait'
 
@@ -18,10 +19,24 @@ else
   require 'stm32'
 end
 
+if File.file? '../p3/lib/p3.rb'
+  require '../p3/lib/p3.rb'
+  puts "using local p3 lib"
+  local=true
+else
+  require 'p3'
+end
+
 def isprint(c)
   /[[:print:]]/ === c.chr
 end
 
+$p=P3.new do |pac|
+  # this is run when we get packet from server
+  broadcast "we got packet! #{pac}\n"
+  pp $p.pack pac
+  $sp.write $p.pack pac
+end
 
 options = {}
 CONF_FILE='/etc/stm32.conf'
@@ -86,28 +101,32 @@ end
 
 #pp options
 
-stm=Stm32.new options
+$stm=stm=Stm32.new options
 
 $sp=stm.get_port()
-if stm.boot
-  stm.get_info
-  if options[:flash]
-    if stm.flash options[:flash]
-      if stm.run
-        broadcast "RUNNING OK!\n\n"
+if options[:flash] or options[:go]
+  if stm.boot
+    stm.get_info
+    if options[:flash]
+      if stm.flash options[:flash]
+        if stm.run
+          broadcast "RUNNING OK!\n\n"
+        end
+      end
+    else
+      if options[:go]
+        if stm.run
+          broadcast "RUNNING OK!\n\n"
+        end
+      else
+        broadcast "BOOTED OK!\r\n>"
       end
     end
   else
-    if options[:go]
-      if stm.run
-        broadcast "RUNNING OK!\n\n"
-      end
-    else
-      broadcast "BOOTED OK!\r\n>"
-    end
+    puts "Error: Boot failed! retry!\r\n"
   end
 else
-  puts "Error: Boot failed! retry!\r\n"
+  stm.set_state :running #assume it is running..
 end
 
 #pp stm.run
@@ -148,24 +167,30 @@ begin
       oldstate=curstate
     end
     if port.ready_for_read?
-      ch = port.readbyte
-      if not ch
-      elsif ch==0x0a and stm.get_state==:running
-        @bufo+= "\n\r"
-      elsif ch==0x0d and stm.get_state==:running
-
-      elsif ch>0x1f and stm.get_state==:running
-        @bufo+=ch.chr
-      else
-        @bufo+=sprintf("[%02x]",ch)
+      begin
+        ch = port.readbyte
+      rescue
+        next
       end
-      if (silent>2 and @bufo!="") or (@bufo.size>10)
+      if not $p.inchar(ch.ord)
+        if ch==0x0a and stm.get_state==:running
+          @bufo+= "\n\r"
+        elsif ch==0x0d and stm.get_state==:running
+
+        elsif ch>0x1f and stm.get_state==:running
+          @bufo+=ch.chr
+        else
+          @bufo+=sprintf("[%02x]",ch)
+        end
+      end
+    else
+      if (silent>5 and @bufo!="") or (@bufo.size>10)
         broadcast @bufo
         #printf @bufo
         @bufo=""
         silent=0
       end
-    else
+      silent+=1
       if $stdin.ready?
         if curstate==:running  #terminal mode
           c = $stdin.getc
@@ -256,7 +281,7 @@ begin
           end
           broadcast "\r\n>"
         rescue => e
-          puts "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq error:",e
+          puts "queue found error:",e
         end
       else
         sleep 0.01

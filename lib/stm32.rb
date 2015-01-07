@@ -3,7 +3,7 @@
 
 require 'json'
 require 'serialport'
-#require 'srec'
+require 'srec'
 
 class IO
   def ready_for_read?
@@ -48,6 +48,7 @@ class Stm32
 
   def initialize(hash={})
     @clist=@@Clist_def
+    @old_srec={} #we assume nothing flashed
     @debug=hash[:debug]
     if not hash[:dev]
       puts "Error: No serial Device??"
@@ -80,8 +81,17 @@ class Stm32
   def get_state()
     @state
   end
+
+  def set_state(s)
+    @state=s
+  end
+
   def get_cpu(k)
-    @cpu_info[k]
+    if @cpu_info
+      @cpu_info[k]
+    else
+      false
+    end
   end
 
   def flush_chars tout=0.1
@@ -390,41 +400,68 @@ class Stm32
         return nil
       end
     end
-    broadcast "Flashing #{fn}\n"
-    s=Srec.new file: fn
-    bsize=get_cpu(:flash_bsize)
-    fs=get_cpu(:flash_s)
-    fe=get_cpu(:flash_e)
-    b= s.to_blocks fs,fe,bsize
-    broadcast "#{b.size} blocks of #{bsize} bytes\n"
-    list=[]
-    b.each do |blk,data|
-      list << blk
+    if not get_cpu(:flash_bsize)
+      get_info
     end
-    start=Time.now.to_i
-    if erase list
-      dur=Time.now.to_i-start
-      broadcast "Erased in #{dur}s\n"
-      cnt=0
-      start=Time.now.to_i
-      b.each do |blk,data|
-        addr=blk*bsize+fs
-        if write addr,data
-          if cnt%10==0
-            printf("\r#{cnt}/#{b.length} %.0f%% ",100.0*cnt/b.length)
-            broadcast "."
-          end
-        else
-          broadcast "Error: Write fails at #{addr}\n"
-          break
-        end
-        cnt+=1
+    begin
+      broadcast "Flashing #{fn}  -- old #{@old_srec.size}\n"
+      s=Srec.new file: fn
+      bsize=get_cpu(:flash_bsize)
+      fs=get_cpu(:flash_s)
+      fe=get_cpu(:flash_e)
+      bfull=b=s.to_blocks fs,fe,bsize
+      broadcast "#{b.size} blocks of #{bsize}\n"
+      if @old_srec
+        b=Srec::diff b,@old_srec
+        broadcast "DIFF: #{b.size} blocks of #{bsize}\n"
       end
-      dur=Time.now.to_i-start
-      broadcast "\nFlashed in #{dur}s\n"
-      return true
-    else
-      puts "Error: Erase failed"
+      if b.size==0
+        broadcast "Nothing to do -- chip is up to date\n"
+        return true
+      end
+      list=[]
+      b.each do |blk,data|
+        list << blk
+      end
+      start=Time.now.to_f
+      broadcast "Erasing... \n"
+      if erase list
+        dur=Time.now.to_f-start
+        broadcast "Erased in #{dur}s\n"
+        @old_srec={}
+        cnt=0
+        ok=true
+        start=Time.now.to_i
+        b.each do |blk,data|
+          addr=blk*bsize+fs
+          if write addr,data
+            if cnt%10==0
+              printf("\r#{cnt}/#{b.length} %.0f%% ",100.0*cnt/b.length)
+              broadcast "."
+            end
+          else
+            broadcast "Error: Write fails at #{addr}\n"
+            ok=false
+            break
+          end
+          cnt+=1
+        end
+        dur=Time.now.to_f-start
+        if ok
+          broadcast "\nFlashed in #{dur}s\n"
+          @old_srec=bfull
+          return true
+        else
+          broadcast "\nFlash Failed\n"
+          boot
+          get_info
+        end
+      else
+        puts "Error: Erase failed"
+      end
+    rescue => e
+      puts "Error: Flash Failed: #{e}"
+      pp e.backtrace
     end
     return nil
   end
