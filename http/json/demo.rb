@@ -26,7 +26,7 @@ def json_demo request,args,session,event
       f={ok: true}
     else
       #puts "to queue... #{act} #{$sq.empty?}"
-      $sq << {act: act}
+      $sq << {act: act, args: args}
     end
     return ["text/json",f]
   rescue => e

@@ -9,7 +9,6 @@ require 'pp'
 require 'io/wait'
 
 local=false
-require 'srec'
 
 if File.file? './lib/stm32.rb'
   require './lib/stm32.rb'
@@ -27,6 +26,14 @@ else
   require 'p3'
 end
 
+if File.file? '../srec/lib/srec.rb'
+  require '../srec/lib/srec.rb'
+  puts "using local srec lib"
+  local=true
+else
+  require 'srec'
+end
+
 def isprint(c)
   /[[:print:]]/ === c.chr
 end
@@ -34,6 +41,12 @@ end
 $p=P3.new do |pac|
   # this is run when we get packet from server
   broadcast "we got packet! #{pac}\n"
+  pp $p.pack pac
+  $sp.write $p.pack pac
+end
+
+$p_server=$p.server(port: 3003, mac: "11:99")  do |pac|
+  broadcast "SERVER got packet! #{pac}\n"
   pp $p.pack pac
   $sp.write $p.pack pac
 end
@@ -272,11 +285,31 @@ begin
           if act[:act]=="go"
             do_go stm
           elsif act[:act]=="flash"
-            stm.flash "/home/arisi/projects/mygit/arisi/ctex/bin/sol_STM32L_mg11.srec"
+            if stm.flash "/home/arisi/projects/mygit/arisi/ctex/bin/sol_STM32L_mg11.srec"
+              if stm.flash "/home/arisi/projects/mygit/arisi/ctex_apps/bin/appi.srec"
+                stm.go
+              else
+                broadcast "appi flash failed"
+              end
+            else
+              broadcast "kernel flash failed"
+            end
+          elsif act[:act]=="flasha"
+            stm.flash "/home/arisi/projects/mygit/arisi/ctex_apps/bin/appi.srec"
             stm.go
           elsif act[:act]=="boot"
             do_boot(stm)
-         elsif act[:act]=="id"
+          elsif act[:act]=="s3"
+            pp act
+            pac={
+              proto:'P',
+              mac: "00:00",
+              ip: "0.0.0.0",
+              port:0,
+              data:act[:args]["val"]
+            }
+            $sp.write $p.pack pac
+          elsif act[:act]=="id"
             stm.get_info
           end
           broadcast "\r\n>"

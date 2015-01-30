@@ -35,7 +35,7 @@ class Stm32
   @@Cpu_ids={
     0x416 => {
       family: :L1,
-      ram_s:0x20000800,
+      ram_s:0x20000000,
       ram_e:0x20004000,
       flash_s:0x8000000,
       flash_e:0x08020000,
@@ -43,7 +43,7 @@ class Stm32
       serno:0x1ff80050,
       flash_initial:0
       },
-    0x413 => {family: :F4,ram_s:0x20002000,ram_e:0x20020000,flash_s:0x8000000,flash_e:0x08100000,flash_blk:16384,serno:0x1fff7a10,flash_initial:0xff},
+    0x413 => {family: :F4,ram_s:0x20000000,ram_e:0x20020000,flash_s:0x8000000,flash_e:0x08100000,flash_blk:16384,serno:0x1fff7a10,flash_initial:0xff},
     }
 
   def initialize(hash={})
@@ -405,12 +405,38 @@ class Stm32
     end
     begin
       broadcast "Flashing #{fn}  -- old #{@old_srec.size}\n"
+      if not File.file? fn
+        broadcast "S-file does not exist!!!"
+        return false
+      end
       s=Srec.new file: fn
       bsize=get_cpu(:flash_bsize)
+      if false
+        rs=get_cpu(:ram_s)
+        re=get_cpu(:ram_e)
+        ram=s.to_blocks rs,re,bsize
+        cnt=0
+        broadcast "Ram: #{ram.size} blocks to sram  #{rs.to_s(16)} .. #{re.to_s(16)}\n"
+        ram.each do |blk,data|
+          addr=blk*bsize+rs
+          if write addr,data
+            if cnt%10==0
+              printf("\rram #{cnt}/#{ram.length} %.0f%% ",100.0*cnt/b.length)
+              broadcast "."
+            end
+          else
+            broadcast "Error: Write fails at #{addr.to_s(16)}\n"
+            ok=false
+            break
+          end
+          cnt+=1
+        end
+        broadcast "Flashed #{cnt} blocks to sram\n"
+      end
       fs=get_cpu(:flash_s)
       fe=get_cpu(:flash_e)
       bfull=b=s.to_blocks fs,fe,bsize
-      broadcast "#{b.size} blocks of #{bsize}\n"
+      broadcast "#{b.size} blocks\n"
       if @old_srec
         b=Srec::diff b,@old_srec
         broadcast "DIFF: #{b.size} blocks of #{bsize}\n"
@@ -422,13 +448,13 @@ class Stm32
       list=[]
       b.each do |blk,data|
         list << blk
+        @old_srec.delete blk # must assume these were wiped even if error reported during erase...
       end
       start=Time.now.to_f
       broadcast "Erasing... \n"
       if erase list
         dur=Time.now.to_f-start
         broadcast "Erased in #{dur}s\n"
-        @old_srec={}
         cnt=0
         ok=true
         start=Time.now.to_i
@@ -440,7 +466,7 @@ class Stm32
               broadcast "."
             end
           else
-            broadcast "Error: Write fails at #{addr}\n"
+            broadcast "Error: Write fails at #{addr.to_s(16)}\n"
             ok=false
             break
           end
@@ -449,12 +475,15 @@ class Stm32
         dur=Time.now.to_f-start
         if ok
           broadcast "\nFlashed in #{dur}s\n"
-          @old_srec=bfull
+          b.each do |blk,data|
+            @old_srec[blk]=data # this was done :)
+          end
           return true
         else
           broadcast "\nFlash Failed\n"
           boot
           get_info
+          return false
         end
       else
         puts "Error: Erase failed"
@@ -463,7 +492,7 @@ class Stm32
       puts "Error: Flash Failed: #{e}"
       pp e.backtrace
     end
-    return nil
+    return false
   end
 
 end

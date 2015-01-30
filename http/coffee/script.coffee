@@ -4,15 +4,19 @@ xx=123
 session=null
 
 sse_data = (data) ->
-  console.log "sse:",data
+  #console.log "sse:",data
   obj=$("#rightcolumn")
   if data.logs
+    arr=obj.html().split("\n")
+    if arr.length>100
+      obj.html("")
+    #console.log arr
     for l in data.logs
-      obj.append("#{l}")
+      obj.append(l)
     obj.scrollTop($("#rightcolumn")[0].scrollHeight);
   if data.session
     session=data.session
-    obj.append "GOT SESSION:#{session}<br>"
+    obj.append "GOT SESSION:#{session}\n"
 
 
 ajax_data = (data) ->

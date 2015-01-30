@@ -27,10 +27,14 @@
       %a.pro{onClick: "stm_port('boot',0); return(false);"} BOOT
       %a.pro{onClick: "stm_port('id',0); return(false);"} ID
       %a.pro{onClick: "stm_port('flash',0); return(false);"} FLASH
+      %a.pro{onClick: "stm_port('flasha',0); return(false);"} FLASH_APP
       %a.pro{onClick: "stm_port('go',0); return(false);"} GO
     #rightcolumn
     #cbot
-      %input{onkeydown: "if (event.keyCode == 13) {stm_port('puts',$(this).val());$(this).val('');}; return(true);"}
+      %input#dada{onkeydown: "if (event.keyCode == 13) {stm_port('puts',$(this).val());$(this).val('');}; return(true);"}
+      %a.pro{onClick: "stm_port('s3',$('#dada').val()); return(false);"} S3
+      %a.pro{onClick: "stm_port('puts','appi start'); return(false);"} START_APP
+      %a.pro{onClick: "stm_port('puts','appi stop'); return(false);"} STOP_APP
       %a.pro{onClick: "stm_port('puts','tasks stat'); return(false);"} TASKS
       %a.pro{onClick: "stm_port('puts','rbuf stat'); return(false);"} RBUFS
       %a.pro{onClick: "stm_port('puts','mem stat'); return(false);"} MEMSTAT
